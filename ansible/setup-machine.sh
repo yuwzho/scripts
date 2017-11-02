@@ -1,16 +1,17 @@
 # !/bin/bash
 
-subscriptionId=
-clientId=
-secret=
-tenant=
+subscriptionId=$1
+clientId=$2
+secret=$3
+tenant=$4
 # resource group you want to run the test
-resourceGroup=
+resourceGroup=$5
 
 # check whether in root
 
 # install user env
 apt-get update && apt-get install -y libssl-dev libffi-dev python-dev python-pip
+pip install pip --upgrade
 pip install ansible[azure]
 
 # create credential file
