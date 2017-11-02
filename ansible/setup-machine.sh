@@ -11,6 +11,7 @@ resourceGroup=$5
 
 # install user env
 apt-get update && apt-get install -y libssl-dev libffi-dev python-dev python-pip
+pip install pip --upgrade
 pip install ansible[azure]
 
 # create credential file
