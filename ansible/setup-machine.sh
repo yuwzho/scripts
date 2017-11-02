@@ -1,11 +1,11 @@
 # !/bin/bash
 
-subscriptionId=
-clientId=
-secret=
-tenant=
+subscriptionId=$1
+clientId=$2
+secret=$3
+tenant=$4
 # resource group you want to run the test
-resourceGroup=
+resourceGroup=$5
 
 # check whether in root
 
