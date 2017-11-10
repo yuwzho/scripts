@@ -10,7 +10,7 @@ resourceGroup=$5
 # check whether in root
 
 # install user env
-apt-get update && apt-get install -y libssl-dev libffi-dev python-dev python-pip
+apt-get update && apt-get install -y libssl-dev libffi-dev python-dev python-pip docker.io
 pip install pip --upgrade
 pip install ansible[azure]
 
