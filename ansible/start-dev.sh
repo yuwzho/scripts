@@ -1,4 +1,4 @@
-! /bin/bash
+#!/bin/bash
 
 cd ansible
 . venv/bin/activate
