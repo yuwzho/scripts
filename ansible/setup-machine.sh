@@ -10,7 +10,8 @@ resourceGroup=$5
 # check whether in root
 
 # install user env
-apt-get update && apt-get install -y libssl-dev libffi-dev python-dev python-pip docker.io
+apt-get intall python-pip=9.0.1
+apt-get update && apt-get install -y libssl-dev libffi-dev python-dev docker.io
 pip install pip --upgrade
 pip install ansible[azure]
 
