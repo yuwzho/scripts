@@ -1,0 +1,10 @@
+---
+- hosts: localhost
+  tasks:
+    - name: create resource group
+      azure_rm_resourcegroup:
+        name: "{{ resourcegroup }}"
+        location: eastus
+
+    - include_tasks: "{{test}}"
+    
