@@ -3,7 +3,7 @@
   tasks:
     - name: create resource group
       azure_rm_resourcegroup:
-        name: "{{ resourcegroup }}"
+        name: "{{ resource_group }}"
         location: eastus
 
     - include_tasks: "{{test}}"
