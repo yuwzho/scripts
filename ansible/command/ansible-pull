@@ -5,6 +5,6 @@ if [ ! -v "$ANSIBLE_VERSION" ]; then
   export ANSIBLE_VERSION='devel'
 fi
 
-source $HOME/$ANSIBLE_VERSION/bin/activate
+source $HOME/.ansible/$ANSIBLE_VERSION/bin/activate
 ansible-pull "$@"
 deactivate
