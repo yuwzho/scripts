@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 set -e
-if [ ! -v "$ANSIBLE_VERSION" ]; then
+if [ -z "$ANSIBLE_VERSION" ]; then
   export ANSIBLE_VERSION='devel'
 fi
 
