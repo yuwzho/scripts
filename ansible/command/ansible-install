@@ -9,12 +9,15 @@ dir=$HOME/.ansible/$ANSIBLE_VERSION
 
 install="pip install ansible[azure]==$ANSIBLE_VERSION"
 if [ $ANSIBLE_VERSION == 'devel' ]; then
-  install="pip install git+https://github.com/ansible/ansible.git@devel"
+  if [[ -z "$ANSIBLE_URI" ]]; then
+     export ANSIBLE_URI="https://github.com/ansible/ansible.git@devel"
+  fi
+  install="pip install git+$ANSIBLE_URI && wget -O require.txt https://raw.githubusercontent.com/ansible/ansible/devel/packaging/requirements/requirements-azure.txt && pip install -r require.txt"
   rm -rf $dir > /dev/null 2>&1
 fi
 
 if [ ! -d $dir ]; then
   mkdir $dir
   python -m virtualenv $dir
-  /bin/bash -c "source $dir/bin/activate && $install && pip install pywinrm>=0.2.2 && deactivate"
+  /bin/bash -c "source $dir/bin/activate && $install && pip install pywinrm && deactivate"
 fi
