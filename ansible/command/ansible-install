@@ -12,7 +12,11 @@ if [ $ANSIBLE_VERSION == 'devel' ]; then
   if [[ -z "$ANSIBLE_URI" ]]; then
      export ANSIBLE_URI="https://github.com/ansible/ansible.git@devel"
   fi
-  install="pip install git+$ANSIBLE_URI && wget -O require.txt https://raw.githubusercontent.com/ansible/ansible/devel/packaging/requirements/requirements-azure.txt && pip install -r require.txt"
+  github_raw='raw.githubusercontent.com'
+  slash='/'
+  branch=${ANSIBLE_URI/.git@/$slash}
+  github_content=${branch/github.com/$github_raw}
+  install="pip install git+$ANSIBLE_URI && wget -O require.txt $github_content/packaging/requirements/requirements-azure.txt && pip install -r require.txt"
   rm -rf $dir > /dev/null 2>&1
 fi
 
