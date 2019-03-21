@@ -8,7 +8,7 @@ fi
 dir=$HOME/.ansible/$ANSIBLE_VERSION
 
 install="pip install ansible[azure]==$ANSIBLE_VERSION"
-if [ $ANSIBLE_VERSION == 'devel' ]; then
+if [[ $ANSIBLE_VERSION == 'devel' || ! -z "$ANSIBLE_URI" ]]; then
   if [[ -z "$ANSIBLE_URI" ]]; then
      export ANSIBLE_URI="https://github.com/ansible/ansible.git@devel"
   fi
