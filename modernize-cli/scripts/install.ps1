@@ -1,0 +1,148 @@
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+    Installs the GitHub Copilot modernize CLI.
+.DESCRIPTION
+    Downloads the latest modernize release for Windows, verifies the gh CLI
+    version, extracts the binary, and adds it to the current user PATH.
+.PARAMETER InstallDir
+    Directory to install modernize into. Defaults to %LOCALAPPDATA%\Programs\modernize.
+#>
+[CmdletBinding()]
+param(
+    [string]$InstallDir = (Join-Path (Join-Path $env:LOCALAPPDATA 'Programs') 'modernize')
+)
+
+$ErrorActionPreference = 'Stop'
+
+$GitHubRepo    = 'microsoft/modernize-cli'
+$MinGhVersion  = [Version]'2.45.0'
+
+# --- Helpers ---
+
+function Write-Info  { param([string]$Msg) Write-Host "[info]  $Msg" -ForegroundColor Green  }
+function Write-Warn  { param([string]$Msg) Write-Host "[warn]  $Msg" -ForegroundColor Yellow }
+function Exit-Error  { param([string]$Msg) Write-Host "[error] $Msg" -ForegroundColor Red; exit 1 }
+
+# --- Detect architecture ---
+
+$detectedArch = $null
+try {
+    $detectedArch = [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
+} catch {
+}
+
+if (-not $detectedArch) {
+    $detectedArch = $env:PROCESSOR_ARCHITEW6432
+    if (-not $detectedArch) {
+        $detectedArch = $env:PROCESSOR_ARCHITECTURE
+    }
+}
+
+$arch = switch (($detectedArch -as [string]).ToUpperInvariant()) {
+    'ARM64' { 'arm64' }
+    'X64'   { 'x64'   }
+    'AMD64' { 'x64'   }
+    default { Exit-Error "Unsupported architecture: $detectedArch" }
+}
+
+Write-Info "Detected platform: windows/$arch"
+
+# --- Check gh CLI version ---
+
+if (Get-Command gh -ErrorAction SilentlyContinue) {
+    $ghRaw = (gh --version 2>&1 | Select-Object -First 1) -as [string]
+    if ($ghRaw -match '(\d+\.\d+\.\d+)') {
+        $ghVersion = [Version]$Matches[1]
+        if ($ghVersion -lt $MinGhVersion) {
+            Write-Warn "gh CLI version $ghVersion is below the minimum required version $MinGhVersion."
+            Write-Warn 'Please update gh CLI: https://cli.github.com/'
+            $answer = Read-Host 'Continue anyway? [y/N]'
+            if ($answer -notmatch '^[yY]') {
+                Exit-Error 'Installation aborted.'
+            }
+        } else {
+            Write-Info "gh CLI version $ghVersion OK"
+        }
+    } else {
+        Write-Warn "Could not parse gh CLI version from: $ghRaw"
+    }
+} else {
+    Write-Warn 'gh CLI not found. Please install it from https://cli.github.com/'
+}
+
+# --- Fetch latest stable release ---
+# Explicitly iterates releases to skip any prerelease or draft entries.
+
+Write-Info 'Fetching latest stable release...'
+
+$apiHeaders = @{ Accept = 'application/vnd.github+json'; 'User-Agent' = 'modernize-installer' }
+
+try {
+    $releases = Invoke-RestMethod `
+        -Uri     "https://api.github.com/repos/$GitHubRepo/releases?per_page=20" `
+        -Headers $apiHeaders
+} catch {
+    Exit-Error "Failed to fetch release info from GitHub: $_"
+}
+
+# Pick the first release that is not a prerelease and not a draft
+$release = $releases | Where-Object { -not $_.prerelease -and -not $_.draft } | Select-Object -First 1
+
+if (-not $release) { Exit-Error 'Could not find a stable release.' }
+
+$tag     = $release.tag_name
+$version = $tag -replace '^v', ''
+
+if (-not $version) { Exit-Error 'Could not determine latest stable version.' }
+Write-Info "Latest stable version: $version"
+
+# --- Download ---
+
+$archiveName  = "modernize_${version}_windows_${arch}.zip"
+$downloadUrl  = "https://github.com/$GitHubRepo/releases/download/$tag/$archiveName"
+
+$tmpDir      = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
+$archivePath = Join-Path $tmpDir $archiveName
+New-Item -ItemType Directory -Path $tmpDir | Out-Null
+
+try {
+    Write-Info "Downloading $archiveName..."
+    try {
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $archivePath -UseBasicParsing
+    } catch {
+        Exit-Error "Download failed: $_"
+    }
+
+    # --- Extract ---
+
+    Write-Info 'Extracting archive...'
+    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+    try {
+        Expand-Archive -Path $archivePath -DestinationPath $InstallDir -Force
+    } catch {
+        Exit-Error "Failed to extract archive: $_"
+    }
+
+    Write-Info "Installed modernize to $InstallDir"
+} finally {
+    Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue
+}
+
+# --- Add to user PATH ---
+
+$userPath = [System.Environment]::GetEnvironmentVariable('PATH', 'User')
+if ($null -eq $userPath) { $userPath = '' }
+if ($userPath -split ';' -contains $InstallDir) {
+    Write-Info "$InstallDir is already in PATH"
+} else {
+    Write-Info "Adding $InstallDir to user PATH..."
+    $newPath = ($userPath.TrimEnd(';') + ";$InstallDir").TrimStart(';')
+    [System.Environment]::SetEnvironmentVariable('PATH', $newPath, 'User')
+    # Also update the current session
+    $env:PATH = ($env:PATH.TrimEnd(';') + ";$InstallDir")
+    Write-Info 'PATH updated. The change will apply to new terminal sessions.'
+}
+
+Write-Host ''
+Write-Info "Installation complete! Run 'modernize' to get started."
