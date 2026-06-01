@@ -1,0 +1,200 @@
+#!/usr/bin/env sh
+set -e
+
+GITHUB_REPO="microsoft/modernize-cli"
+MIN_GH_VERSION="2.45.0"
+
+# --- Helpers ---
+
+info()    { printf '\033[0;32m[info]\033[0m  %s\n' "$*"; }
+warn()    { printf '\033[0;33m[warn]\033[0m  %s\n' "$*" >&2; }
+error()   { printf '\033[0;31m[error]\033[0m %s\n' "$*" >&2; exit 1; }
+
+version_lt() {
+    # Returns 0 (true) if $1 < $2
+    awk -v v1="$1" -v v2="$2" 'BEGIN {
+        n = split(v1, a, "."); split(v2, b, ".")
+        for (i = 1; i <= 3; i++) {
+            x = a[i] + 0; y = b[i] + 0
+            if (x < y) exit 0
+            if (x > y) exit 1
+        }
+        exit 1
+    }'
+}
+
+# --- Detect OS and architecture ---
+
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+case "$OS" in
+    linux)  OS="linux"  ;;
+    darwin) OS="darwin" ;;
+    *)      error "Unsupported OS: $OS" ;;
+esac
+
+case "$OS" in
+    linux)  DEFAULT_INSTALL_DIR="$HOME/.local/share/modernize" ;;
+    darwin) DEFAULT_INSTALL_DIR="$HOME/.local/share/modernize" ;;
+esac
+INSTALL_DIR="${MODERNIZE_INSTALL_DIR:-$DEFAULT_INSTALL_DIR}"
+BIN_DIR="${MODERNIZE_BIN_DIR:-$HOME/.local/bin}"
+
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64|amd64)   ARCH="x64"   ;;
+    aarch64|arm64)  ARCH="arm64" ;;
+    *)              error "Unsupported architecture: $ARCH" ;;
+esac
+
+info "Detected platform: ${OS}/${ARCH}"
+
+# --- Check gh CLI version ---
+
+if command -v gh > /dev/null 2>&1; then
+    GH_VERSION=$(gh --version 2>&1 | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    if [ -z "$GH_VERSION" ]; then
+        warn "Could not determine gh CLI version."
+    elif version_lt "$GH_VERSION" "$MIN_GH_VERSION"; then
+        warn "gh CLI version $GH_VERSION is below the minimum required version $MIN_GH_VERSION."
+        warn "Please update gh CLI: https://cli.github.com/"
+        printf 'Continue anyway? [y/N] '
+        read -r REPLY
+        case "$REPLY" in
+            [yY][eE][sS]|[yY]) ;;
+            *) error "Installation aborted." ;;
+        esac
+    else
+        info "gh CLI version $GH_VERSION OK"
+    fi
+else
+    warn "gh CLI not found. Please install it from https://cli.github.com/"
+fi
+
+# --- Fetch latest stable release version ---
+# Explicitly iterates releases to skip any prerelease or draft entries.
+
+info "Fetching latest stable release..."
+
+if command -v curl > /dev/null 2>&1; then
+    RELEASES_JSON=$(curl -fsSL \
+        -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=20") \
+        || error "Failed to fetch release info from GitHub."
+elif command -v wget > /dev/null 2>&1; then
+    RELEASES_JSON=$(wget -qO- \
+        --header="Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=20") \
+        || error "Failed to fetch release info from GitHub."
+else
+    error "Neither curl nor wget found. Please install one of them."
+fi
+
+# Pick the first release that is not a prerelease and not a draft
+TAG=$(printf '%s' "$RELEASES_JSON" | awk '
+    /"tag_name"/ { tag = $0; gsub(/.*"tag_name": *"|".*/, "", tag); has_tag = 1 }
+    /"prerelease": false/ { not_prerelease = 1 }
+    /"draft": false/ { not_draft = 1 }
+    /^\s*\}/ {
+        if (has_tag && not_prerelease && not_draft && !found) {
+            print tag; found = 1
+        }
+        has_tag = 0; not_prerelease = 0; not_draft = 0; tag = ""
+    }
+')
+VERSION=$(printf '%s' "$TAG" | sed 's/^v//')
+
+[ -n "$VERSION" ] || error "Could not determine latest stable version."
+info "Latest stable version: $VERSION"
+
+# --- Download ---
+
+ARCHIVE="modernize_${VERSION}_${OS}_${ARCH}.tar.gz"
+DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/download/${TAG}/${ARCHIVE}"
+
+TMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
+
+ARCHIVE_PATH="${TMP_DIR}/${ARCHIVE}"
+
+info "Downloading $ARCHIVE..."
+if command -v curl > /dev/null 2>&1; then
+    curl -fL --progress-bar \
+        "$DOWNLOAD_URL" -o "$ARCHIVE_PATH" \
+        || error "Download failed."
+else
+    wget -q --show-progress \
+        "$DOWNLOAD_URL" -O "$ARCHIVE_PATH" \
+        || error "Download failed."
+fi
+
+# --- Extract ---
+
+info "Extracting archive..."
+mkdir -p "${TMP_DIR}/extracted"
+tar -xzf "$ARCHIVE_PATH" -C "${TMP_DIR}/extracted" \
+    || error "Failed to extract archive."
+
+# --- Install ---
+
+mkdir -p "$INSTALL_DIR"
+cp -r "${TMP_DIR}/extracted/." "${INSTALL_DIR}/" \
+    || error "Failed to copy files."
+chmod +x "${INSTALL_DIR}/modernize"
+
+mkdir -p "$BIN_DIR"
+LINK_PATH="$BIN_DIR/modernize"
+rm -f "$LINK_PATH"
+if ln -s "${INSTALL_DIR}/modernize" "$LINK_PATH" 2>/dev/null; then
+    :
+else
+    cp "${INSTALL_DIR}/modernize" "$LINK_PATH" \
+        || error "Failed to create command entrypoint in $BIN_DIR."
+    chmod +x "$LINK_PATH"
+    warn "Could not create symlink. Copied binary to $LINK_PATH instead."
+fi
+
+info "Installed modernize bundle to ${INSTALL_DIR}"
+info "Installed command entrypoint to ${LINK_PATH}"
+
+# --- Add to PATH ---
+
+add_to_profile() {
+    PROFILE_FILE="$1"
+    if [ -f "$PROFILE_FILE" ] || [ "$2" = "create" ]; then
+        if ! grep -qF "$BIN_DIR" "$PROFILE_FILE" 2>/dev/null; then
+            printf '\n# Added by modernize installer\nexport PATH="$PATH:%s"\n' \
+                "$BIN_DIR" >> "$PROFILE_FILE"
+            info "Added $BIN_DIR to PATH in $PROFILE_FILE"
+            PROFILE_UPDATED="$PROFILE_FILE"
+        else
+            info "$PROFILE_FILE already contains $BIN_DIR in PATH"
+        fi
+    fi
+}
+
+case ":${PATH}:" in
+    *":${BIN_DIR}:"*)
+        info "$BIN_DIR is already in PATH"
+        ;;
+    *)
+        info "Adding $BIN_DIR to PATH..."
+        # Detect shell and update the appropriate profile
+        CURRENT_SHELL=$(basename "${SHELL:-sh}")
+        case "$CURRENT_SHELL" in
+            zsh)  add_to_profile "$HOME/.zshrc"  "create" ;;
+            bash) add_to_profile "$HOME/.bashrc" "create" ;;
+            *)
+                add_to_profile "$HOME/.bashrc"
+                add_to_profile "$HOME/.profile" "create"
+                ;;
+        esac
+
+        if [ -n "$PROFILE_UPDATED" ]; then
+            printf '\033[0;33m[info]\033[0m  Run the following to use modernize in this session:\n'
+            printf '        source %s\n' "$PROFILE_UPDATED"
+        fi
+        ;;
+esac
+
+printf '\n'
+info "Installation complete! Run 'modernize' to get started."
